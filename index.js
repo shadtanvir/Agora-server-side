@@ -307,31 +307,6 @@ async function run() {
     });
 
 
-    //Add a new comment (user must be logged in)
-
-    app.post("/posts/:id/comments", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { userId, userName, text } = req.body;
-
-        if (!userId || !text) {
-          return res.status(400).json({ error: "Missing user or text" });
-        }
-
-        const newComment = {
-          postId: id,
-          userId,
-          userName,
-          text,
-          createdAt: new Date(),
-        };
-
-        await commentsCollection.insertOne(newComment);
-        res.json({ success: true, comment: newComment });
-      } catch (err) {
-        res.status(500).json({ error: "Failed to add comment" });
-      }
-    });
 
     // Add a post
     app.post("/posts", async (req, res) => {
@@ -436,6 +411,77 @@ async function run() {
     });
 
 
+    // Comments collection API
+
+    //Add a new comment (user must be logged in)
+
+    app.post("/posts/:id/comments", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const email = req.query.email;
+        const { userId, userName, text } = req.body;
+
+        if (!userId || !text) {
+          return res.status(400).json({ error: "Missing user or text" });
+        }
+
+        const newComment = {
+          postId: id,
+          userId,
+          userName,
+          userEmail: email,
+          text,
+          reported: false,
+          feedback: "",
+          createdAt: new Date(),
+        };
+
+        await commentsCollection.insertOne(newComment);
+        res.json({ success: true, comment: newComment });
+      } catch (err) {
+        res.status(500).json({ error: "Failed to add comment" });
+      }
+    });
+
+    // get comments by post
+    app.get("/comments/:postId", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+      try {
+        const { postId } = req.params;
+        const comments = await commentsCollection.find({ postId }).toArray();
+        res.json(comments);
+      } catch (error) {
+        console.error("Error fetching comments:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // report a comment
+    app.patch("/comments/report/:id", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { feedback } = req.body; // user-selected feedback
+
+        const result = await commentsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              reported: true,
+              feedback: feedback,
+            },
+          }
+        );
+
+        res.json(result);
+      } catch (error) {
+        console.error("Error reporting comment:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+
+
+
+
     // Announcements API
     // Get announcements
     app.get("/announcements", async (req, res) => {
@@ -458,6 +504,7 @@ async function run() {
         res.status(500).send({ error: "Failed to count announcements" });
       }
     });
+
 
 
     app.listen(PORT, () => {
