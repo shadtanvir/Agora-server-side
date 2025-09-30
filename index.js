@@ -81,8 +81,43 @@ async function run() {
     // collections
     const tagsCollection = client.db("agora").collection("tags");
     const postsCollection = client.db("agora").collection("posts");
+    const usersCollection = client.db("agora").collection("users");
     const commentsCollection = client.db("agora").collection("comments");
     const announcementsCollection = client.db("agora").collection("announcements");
+
+
+    // Users Api
+    //  Register or Login User (store in DB if not exists)
+    app.post("/register", async (req, res) => {
+      try {
+        const { email, name, photoURL, badge, role } = req.body;
+
+        if (!email) {
+          return res.status(400).json({ message: "Email is required" });
+        }
+
+        // Check if user already exists
+        let user = await usersCollection.findOne({ email });
+
+        if (!user) {
+          // Create new user with Bronze badge
+          usersCollection.insertOne({
+            name,
+            email,
+            photoURL,
+            role,
+            badge
+          })
+
+          await user.save();
+        }
+
+        res.status(201).json({ message: "User stored successfully", user });
+      } catch (error) {
+        console.error("Error saving user:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
 
     // -------- TAGS API -------- //
 
