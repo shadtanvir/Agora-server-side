@@ -119,6 +119,44 @@ async function run() {
       }
     });
 
+    // count user's posts
+    app.get("/posts/count/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+        const count = await postsCollection.countDocuments({ authorEmail: email });
+        res.json({ count });
+      } catch (error) {
+        console.error("Error counting posts:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // Find user and 3 recent posts
+    app.get("/users/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+
+        // Find user
+        const user = await usersCollection.findOne({ email });
+        if (!user) {
+          return res.status(404).json({ message: "User not found" });
+        }
+
+        // Get last 3 posts
+        const posts = await postsCollection
+          .find({ authorEmail: email })
+          .sort({ createdAt: -1 })
+          .limit(3)
+          .toArray();
+
+        res.json({ user, recentPosts: posts });
+      } catch (error) {
+        console.error("Error fetching user profile:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+
     // -------- TAGS API -------- //
 
     // Get all tags
@@ -213,6 +251,20 @@ async function run() {
       }
     });
 
+    // Get posts by an user
+    app.get("/posts/by-user", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+      try {
+        const { email } = req.query;
+        if (!email) return res.status(400).json({ message: "Email required" });
+
+        const posts = await postsCollection.find({ authorEmail: email }).toArray();
+        res.json(posts);
+      } catch (error) {
+        console.error("Error fetching user posts:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     // fetch single post by id
     app.get("/posts/:id", async (req, res) => {
       try {
@@ -231,6 +283,29 @@ async function run() {
         res.status(500).json({ error: "Failed to fetch post details" });
       }
     });
+
+    // Delete a post
+    app.delete("/posts/:id", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { email } = req.query;
+
+        const post = await postsCollection.findOne({ _id: new ObjectId(id) });
+        if (!post) return res.status(404).json({ message: "Post not found" });
+
+        // Ensure only the author can delete
+        if (post.authorEmail !== email) {
+          return res.status(403).json({ message: "Unauthorized" });
+        }
+
+        const result = await postsCollection.deleteOne({ _id: new ObjectId(id) });
+        res.json(result);
+      } catch (error) {
+        console.error("Error deleting post:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
 
     //Add a new comment (user must be logged in)
 
@@ -257,6 +332,37 @@ async function run() {
         res.status(500).json({ error: "Failed to add comment" });
       }
     });
+
+    // Add a post
+    app.post("/posts", async (req, res) => {
+      try {
+        const { authorImage, authorName, authorEmail, title, description, tag } = req.body;
+
+        if (!authorEmail || !title || !description || !tag) {
+          return res.status(400).json({ message: "Missing required fields" });
+        }
+
+        const newPost = {
+          authorImage,
+          authorName,
+          authorEmail,
+          title,
+          description,
+          tag,
+          upVote: 0,
+          downVote: 0,
+          createdAt: new Date(),
+        };
+
+        const result = await postsCollection.insertOne(newPost);
+
+        res.status(201).json({ message: "Post created successfully", postId: result.insertedId });
+      } catch (error) {
+        console.error("Error creating post:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
 
     /**
  * PATCH /api/posts/:id/upvote
