@@ -119,6 +119,14 @@ async function run() {
       }
     });
 
+    // get user role
+    app.get("/get-user-role", verifyFirebaseToken, async (req, res) => {
+      const user = await usersCollection.findOne({ email: req.decode.email });
+      res.send({ role: user.role });
+    })
+
+
+
     // count user's posts
     app.get("/posts/count/:email", async (req, res) => {
       try {
