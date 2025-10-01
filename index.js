@@ -555,6 +555,36 @@ async function run() {
       }
     });
 
+    // Get all reported comments
+    app.get("/comments/reported", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const reportedComments = await commentsCollection
+          .find({ reported: true })
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.json(reportedComments);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to fetch reported comments" });
+      }
+    });
+
+    // Admin action: delete comment
+    app.delete("/comments/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const { id } = req.params;
+      const result = await commentsCollection.deleteOne({ _id: new ObjectId(id) });
+      res.json(result);
+    });
+
+    // Admin action: dismiss report (keep comment, clear report flag)
+    app.patch("/comments/dismiss/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const { id } = req.params;
+      const result = await commentsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { reported: false, feedback: "" } }
+      );
+      res.json(result);
+    });
+
 
 
 
