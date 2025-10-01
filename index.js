@@ -231,6 +231,19 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+    // Ban user
+    app.patch("/users/ban/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { banned: true } }
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ message: "Failed to ban user" });
+      }
+    });
 
 
 
