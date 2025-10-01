@@ -62,16 +62,7 @@ const verifyFirebaseToken = async (req, res, next) => {
 
   }
 };
-const verifyAdmin = async (req, res, next) => {
-  const user = await usersCollection.findOne({ email: req.decoded.email });
-  if (user.role === "admin") {
-    next();
-  }
-  else {
-    return res.status(403).send({ message: 'Unauthorized Access!' });
 
-  }
-};
 
 const verifyTokenEmail = async (req, res, next) => {
   // console.log(req.decoded.email);
@@ -96,8 +87,23 @@ async function run() {
     const commentsCollection = client.db("agora").collection("comments");
     const announcementsCollection = client.db("agora").collection("announcements");
 
+    // Verify admin middleware
+
+    const verifyAdmin = async (req, res, next) => {
+      const user = await usersCollection.findOne({ email: req.decoded.email });
+      // console.log(user.role)
+      if (user.role === "admin") {
+        next();
+      }
+      else {
+        return res.status(403).send({ message: 'Unauthorized Access!' });
+
+      }
+    };
+
 
     // Users Api
+
     //  Register or Login User (store in DB if not exists)
     app.post("/register", async (req, res) => {
       try {
@@ -129,6 +135,27 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
+    // GET all users with optional search by username)
+    app.get("/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const search = req.query.search || "";
+
+        const excludeEmail = req.decoded.email;
+
+        const query = {
+          ...(search ? { name: { $regex: search, $options: "i" } } : {}),
+          email: { $ne: excludeEmail },
+        };
+
+        const users = await usersCollection.find(query).toArray();
+        res.json(users);
+      } catch (error) {
+        console.error("Error fetching users:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
 
     // get user role
     app.get("/get-user-role", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
@@ -189,6 +216,22 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
+    // PATCH make a user admin
+    app.patch("/users/make-admin/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role: "admin" } }
+        );
+        res.json(result);
+      } catch (error) {
+        console.error("Error updating user:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
 
 
     // -------- TAGS API -------- //
@@ -538,6 +581,29 @@ async function run() {
         res.status(500).send({ error: "Failed to count announcements" });
       }
     });
+    // POST new announcement
+    app.post("/announcements", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const { authorImage, authorName, title, description } = req.body;
+        const newAnnouncement = {
+          authorImage,
+          authorName,
+          title,
+          description,
+          createdAt: new Date()
+        };
+        const result = await announcementsCollection.insertOne(newAnnouncement);
+        res.json(result);
+      } catch (error) {
+        console.error("Error creating announcement:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+
+
+
+
 
 
 
