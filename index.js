@@ -53,7 +53,7 @@ const verifyFirebaseToken = async (req, res, next) => {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = await admin.auth().verifyIdToken(token);
-    // console.log(decoded.email);
+    console.log(decoded.email);
     req.decoded = decoded;
     next();
   }
@@ -91,7 +91,7 @@ async function run() {
 
     const verifyAdmin = async (req, res, next) => {
       const user = await usersCollection.findOne({ email: req.decoded.email });
-      // console.log(user.role)
+      console.log(user.role)
       if (user.role === "admin") {
         next();
       }
@@ -231,18 +231,15 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
     // Ban user
-    app.patch("/users/ban/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      try {
-        const { id } = req.params;
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { banned: true } }
-        );
-        res.json(result);
-      } catch (err) {
-        res.status(500).json({ message: "Failed to ban user" });
-      }
+    app.patch("/users/ban/:userId", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const { userId } = req.params;
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(userId) },
+        { $set: { banned: true } }
+      );
+      res.json(result);
     });
 
 
@@ -260,6 +257,18 @@ async function run() {
           res.status(500).send({ error: "Failed to fetch tags" });
         }
       });
+
+    // Add a tag
+    app.post("/tags", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const { name } = req.body;
+        const result = await tagsCollection.insertOne({ name });
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ message: "Failed to add tag" });
+      }
+    });
+
 
     // Search by tag
     app.get("/search", async (req, res) => {
@@ -568,7 +577,7 @@ async function run() {
       }
     });
 
-    // Get all reported comments
+    //  Get all reported comments
     app.get("/comments/reported", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       try {
         const reportedComments = await commentsCollection
@@ -581,14 +590,15 @@ async function run() {
       }
     });
 
-    // Admin action: delete comment
+
+    // Delete a reported comment
     app.delete("/comments/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const { id } = req.params;
       const result = await commentsCollection.deleteOne({ _id: new ObjectId(id) });
       res.json(result);
     });
 
-    // Admin action: dismiss report (keep comment, clear report flag)
+    // Dismiss a report (set reported=false, feedback="")
     app.patch("/comments/dismiss/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const { id } = req.params;
       const result = await commentsCollection.updateOne(
@@ -642,6 +652,22 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
+
+    // Admin stats API
+
+    app.get("/admin/stats", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const posts = await postsCollection.countDocuments();
+        const comments = await commentsCollection.countDocuments();
+        const users = await usersCollection.countDocuments();
+
+        res.json({ posts, comments, users });
+      } catch (error) {
+        res.status(500).json({ message: "Failed to fetch stats" });
+      }
+    });
+
 
 
 
