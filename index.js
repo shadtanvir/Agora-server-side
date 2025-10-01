@@ -1,7 +1,9 @@
 const dotenv = require("dotenv");
 const express = require("express");
 const cors = require("cors");
+
 // const { ObjectId } = require("mongodb");
+
 
 
 const { MongoClient, ServerApiVersion, ObjectId, ChangeStream } = require("mongodb");
@@ -29,7 +31,7 @@ app.use(cors());
 app.use(express.json());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.gshi3kg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 // MongoDB Connection
 const client = new MongoClient(uri, {
@@ -79,6 +81,8 @@ const verifyTokenEmail = async (req, res, next) => {
 
 async function run() {
   try {
+
+
     // await client.connect();
     // collections
     const tagsCollection = client.db("agora").collection("tags");
@@ -86,6 +90,39 @@ async function run() {
     const usersCollection = client.db("agora").collection("users");
     const commentsCollection = client.db("agora").collection("comments");
     const announcementsCollection = client.db("agora").collection("announcements");
+
+    // Payment related API
+
+
+    /* Stripe instance
+   Create payment intent*/
+    app.post("/create-payment-intent", verifyFirebaseToken, async (req, res) => {
+      try {
+        const { amount, user } = req.body;
+
+        if (!amount || amount <= 0) {
+          return res.status(400).send({ error: "Invalid amount" });
+        }
+
+        // Convert to smallest currency unit (e.g. cents for USD, poisha for BDT)
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount * 100, // if amount is in dollars/taka
+          currency: "usd", // change to "bdt" if you want taka
+          metadata: {
+            email: user.email,
+            name: user.name,
+          },
+        });
+
+        res.send({ clientSecret: paymentIntent.client_secret });
+      } catch (err) {
+        console.error("Stripe error:", err);
+        res.status(500).send({ error: err.message });
+      }
+    });
+
+
+
 
     // Verify admin middleware
 
@@ -136,6 +173,24 @@ async function run() {
       }
     });
 
+    // Upgrade badge after payment
+    app.patch("/users/upgrade/:email", verifyFirebaseToken, async (req, res) => {
+      try {
+        const { email } = req.params;
+
+        const result = await usersCollection.updateOne(
+          { email },
+          { $set: { badge: "gold" } }
+        );
+
+        res.json({ success: true, result });
+      } catch (error) {
+        console.error("Error upgrading badge:", error);
+        res.status(500).json({ message: "Failed to upgrade badge" });
+      }
+    });
+
+
     // GET all users with optional search by username)
     app.get("/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       try {
@@ -172,7 +227,28 @@ async function run() {
 
         res.json({ role: user.role });
       } catch (error) {
-        console.error("Error fetching user role:", error);
+
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+    // GET a user 
+    app.get("/get-user", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+      try {
+        const email = req.query.email;
+        console.log("inside get-user");
+        if (!email) {
+          return res.status(400).json({ message: "Email is required" });
+        }
+
+        const dbUser = await usersCollection.findOne({ email });
+        if (!dbUser) {
+          return res.status(404).json({ message: "User not found" });
+        }
+
+        res.json(dbUser);
+      } catch (error) {
+
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
