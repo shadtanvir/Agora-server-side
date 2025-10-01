@@ -62,6 +62,17 @@ const verifyFirebaseToken = async (req, res, next) => {
 
   }
 };
+const verifyAdmin = async (req, res, next) => {
+  const user = await usersCollection.findOne({ email: req.decoded.email });
+  if (user.role === "admin") {
+    next();
+  }
+  else {
+    return res.status(403).send({ message: 'Unauthorized Access!' });
+
+  }
+};
+
 const verifyTokenEmail = async (req, res, next) => {
   // console.log(req.decoded.email);
   // console.log(req.query.email);
@@ -109,7 +120,7 @@ async function run() {
             badge
           })
 
-          await user.save();
+
         }
 
         res.status(201).json({ message: "User stored successfully", user });
@@ -120,10 +131,25 @@ async function run() {
     });
 
     // get user role
-    app.get("/get-user-role", verifyFirebaseToken, async (req, res) => {
-      const user = await usersCollection.findOne({ email: req.decode.email });
-      res.send({ role: user.role });
-    })
+    app.get("/get-user-role", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email) {
+          return res.status(400).json({ message: "Email is required" });
+        }
+
+        const user = await usersCollection.findOne({ email });
+        if (!user) {
+          return res.status(404).json({ message: "User not found" });
+        }
+
+        res.json({ role: user.role });
+      } catch (error) {
+        console.error("Error fetching user role:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
 
 
 
