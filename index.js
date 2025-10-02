@@ -67,6 +67,8 @@ const verifyFirebaseToken = async (req, res, next) => {
 
 
 
+
+
 const verifyTokenEmail = async (req, res, next) => {
   // console.log(req.decoded.email);
   // console.log(req.query.email);
@@ -150,7 +152,28 @@ async function run() {
         res.status(500).json({ message: "Server error in verifyAdmin" });
       }
     };
+    // Verify ban middleware
+    const verifyNotBanned = async (req, res, next) => {
+      console.log("inside VNB");
+      try {
 
+        const email = req.decoded?.email;
+        if (!email) {
+          return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        const user = await usersCollection.findOne({ email });
+        if (user?.banned) {
+          return res.status(403).json({ message: "Your account is banned." });
+        }
+
+        next();
+      } catch (error) {
+        console.log(error.message);
+        console.error("Error in verifyNotBanned:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    };
 
 
 
@@ -211,6 +234,8 @@ async function run() {
     app.get("/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       try {
         const search = req.query.search || "";
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
 
         const excludeEmail = req.decoded.email;
 
@@ -219,13 +244,26 @@ async function run() {
           email: { $ne: excludeEmail },
         };
 
-        const users = await usersCollection.find(query).toArray();
-        res.json(users);
+        const total = await usersCollection.countDocuments(query);
+
+        const users = await usersCollection
+          .find(query)
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .toArray();
+
+        res.json({
+          users,
+          total,
+          page,
+          totalPages: Math.ceil(total / limit),
+        });
       } catch (error) {
         console.error("Error fetching users:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
 
 
     // get user role
@@ -478,20 +516,34 @@ async function run() {
         res.status(500).send({ error: "Failed to fetch posts" });
       }
     });
-
-    // Get posts by an user
+    // fetch all the podt of a user + pagination
     app.get("/posts/by-user", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
       try {
-        const { email } = req.query;
+        const { email, page = 1, limit = 5 } = req.query;
         if (!email) return res.status(400).json({ message: "Email required" });
 
-        const posts = await postsCollection.find({ authorEmail: email }).toArray();
-        res.json(posts);
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const posts = await postsCollection
+          .find({ authorEmail: email })
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(parseInt(limit))
+          .toArray();
+
+        const total = await postsCollection.countDocuments({ authorEmail: email });
+
+        res.json({
+          posts,
+          total,
+          hasMore: page * limit < total,
+        });
       } catch (error) {
         console.error("Error fetching user posts:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
 
     // fetch single post by id
     app.get("/posts/:id", async (req, res) => {
@@ -537,7 +589,7 @@ async function run() {
 
 
     // Add a post
-    app.post("/posts", async (req, res) => {
+    app.post("/posts", verifyFirebaseToken, verifyNotBanned, async (req, res) => {
       try {
         const { authorImage, authorName, authorEmail, title, description, tag } = req.body;
 
@@ -567,83 +619,129 @@ async function run() {
     });
 
 
-    /**
- * PATCH /api/posts/:id/upvote
- */
-    app.patch("/posts/:id/upvote", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+    // Vote (upvote, downvote)
+
+    app.patch("/posts/:id/vote", verifyFirebaseToken, verifyNotBanned, verifyTokenEmail, async (req, res) => {
       try {
-        const id = req.params.id;
-        await postsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $inc: { upVote: 1 } }
+        const { id } = req.params;
+        const { email, type } = req.query;
+
+        if (!["upvote", "downvote"].includes(type)) {
+          return res.status(400).json({ error: "Invalid vote type" });
+        }
+
+        const postId = new ObjectId(id);
+        const post = await postsCollection.findOne({ _id: postId });
+        if (!post) return res.status(404).json({ error: "Post not found" });
+
+        const existingVote = post.votes?.find(v => v.email === email);
+
+        let updateOps = {};
+
+        if (!existingVote) {
+          // Case 1: New vote
+          updateOps = {
+            $inc: { [type === "upvote" ? "upVote" : "downVote"]: 1 },
+            $push: { votes: { email, type } }
+          };
+        } else if (existingVote.type === type) {
+          // Case 2: Remove same vote
+          updateOps = {
+            $inc: { [type === "upvote" ? "upVote" : "downVote"]: -1 },
+            $pull: { votes: { email } }
+          };
+        } else {
+          // Case 3: Switch vote (no arrayFilters, just $pull + $push)
+          updateOps = {
+            $inc: {
+              [type === "upvote" ? "upVote" : "downVote"]: 1,
+              [type === "upvote" ? "downVote" : "upVote"]: -1
+            },
+            $pull: { votes: { email } },
+            $push: { votes: { email, type } }
+          };
+        }
+
+        const result = await postsCollection.findOneAndUpdate(
+          { _id: postId },
+          updateOps,
+          { returnDocument: "after" }
         );
-        res.json({ success: true });
+
+        res.json(result.value);
       } catch (err) {
-        res.status(500).json({ error: "Failed to upvote" });
+        // console.error(" Vote error:", err);
+        res.status(500).json({ error: "Failed to vote", details: err.message });
       }
     });
 
-    /**
-     * PATCH /api/posts/:id/downvote
-     */
-    app.patch("/posts/:id/downvote", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
-      try {
-        const id = req.params.id;
-        await postsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $inc: { downVote: 1 } }
-        );
-        res.json({ success: true });
-      } catch (err) {
-        res.status(500).json({ error: "Failed to downvote" });
-      }
-    });
 
-    //  Search posts by tag with pagination
-    app.get("/posts/search", async (req, res) => {
+
+
+
+
+
+
+    // search post + pagination
+
+    app.get("search/posts", async (req, res) => {
       try {
         const q = req.query.q || "";
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 5;
         const skip = (page - 1) * limit;
 
+        // filter by tag (case-insensitive regex)
         const filter =
           q.trim().length > 0 ? { tag: { $regex: q, $options: "i" } } : {};
 
         const total = await postsCollection.countDocuments(filter);
 
         const posts = await postsCollection
-          .find(filter)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limit)
+          .aggregate([
+            { $match: filter },
+            {
+              $lookup: {
+                from: "comments",
+                localField: "_id",       // post _id
+                foreignField: "postId",  // comment's postId is ObjectId
+                as: "commentsData",
+              },
+            },
+            {
+              $addFields: {
+                commentsCount: { $size: "$commentsData" },
+                voteDifference: { $subtract: ["$upVote", "$downVote"] },
+              },
+            },
+            { $sort: { createdAt: -1 } }, // newest first
+            { $skip: skip },
+            { $limit: limit },
+          ])
           .toArray();
-
-        // attach comments count
-        for (let p of posts) {
-          const count = await commentsCollection.countDocuments({
-            postId: p._id.toString(),
-          });
-          p.commentsCount = count;
-        }
 
         res.json({
           data: posts,
-          totalPages: Math.ceil(total / limit),
           currentPage: page,
+          totalPages: Math.ceil(total / limit),
         });
       } catch (err) {
-        console.error(err);
+        console.error("❌ Error in /posts/search:", err);
         res.status(500).json({ error: "Failed to search posts" });
       }
     });
+
+
+
+
+
 
 
     // Comments collection API
 
     //Add a new comment (user must be logged in)
 
-    app.post("/posts/:id/comments", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+    app.post("/posts/:id/comments", verifyFirebaseToken, verifyNotBanned, verifyTokenEmail, async (req, res) => {
       try {
         const id = req.params.id;
         const email = req.query.email;
@@ -671,23 +769,37 @@ async function run() {
       }
     });
 
-    // get comments by post
-    app.get("/comments/:postId", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+    // get comments by post with pagination
+    app.get("/comments/:postId", async (req, res) => {
       try {
         const { postId } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 5;
 
-        // ✅ convert postId string → ObjectId
+        const skip = (page - 1) * limit;
+
         const comments = await commentsCollection
           .find({ postId: new ObjectId(postId) })
-          .sort({ createdAt: -1 }) // optional: newest first
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit)
           .toArray();
 
-        res.json(comments);
+        const total = await commentsCollection.countDocuments({
+          postId: new ObjectId(postId),
+        });
+
+        res.json({
+          comments,
+          total,
+          hasMore: page * limit < total,
+        });
       } catch (error) {
         console.error("Error fetching comments:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
 
 
     // report a comment
@@ -712,16 +824,41 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
-    app.get("/reported/comments", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      try {
-        const reporteComment = await commentsCollection.find({ reported: true }).toArray();
-        res.send(reporteComment);
-      }
-      catch (err) {
-        res.send(err);
-      }
+    // GET Reported comments
+    app.get(
+      "/reported/comments",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const page = parseInt(req.query.page) || 1;
+          const limit = parseInt(req.query.limit) || 10;
+          const skip = (page - 1) * limit;
 
-    })
+          const query = { reported: true };
+
+          const total = await commentsCollection.countDocuments(query);
+
+          const reportedComments = await commentsCollection
+            .find(query)
+            .skip(skip)
+            .limit(limit)
+            .sort({ createdAt: -1 }) // newest first
+            .toArray();
+
+          res.send({
+            comments: reportedComments,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit),
+          });
+        } catch (err) {
+          console.error("Error fetching reported comments:", err);
+          res.status(500).send({ message: "Failed to fetch reported comments" });
+        }
+      }
+    );
+
 
 
 
