@@ -48,22 +48,23 @@ const client = new MongoClient(uri, {
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers?.authorization;
-  // console.log(authHeader);
-  if (!authHeader || !authHeader.startsWith('Bearer')) {
-    return res.status(401).send({ message: 'Unauthorized Access!' });
+  if (!authHeader || !authHeader.startsWith("Bearer")) {
+    return res.status(401).json({ message: "Unauthorized Access!" });
   }
-  const token = authHeader.split(' ')[1];
+
+  const token = authHeader.split(" ")[1];
+
   try {
     const decoded = await admin.auth().verifyIdToken(token);
-    console.log(decoded.email);
     req.decoded = decoded;
     next();
-  }
-  catch (error) {
-    return res.status(401).send({ message: 'Unauthorized Access!' });
-
+  } catch (error) {
+    console.error("❌ Token verification failed:", error.message);
+    return res.status(401).json({ message: "Unauthorized Access!" });
   }
 };
+
+
 
 
 const verifyTokenEmail = async (req, res, next) => {
@@ -127,16 +128,30 @@ async function run() {
     // Verify admin middleware
 
     const verifyAdmin = async (req, res, next) => {
-      const user = await usersCollection.findOne({ email: req.decoded.email });
-      console.log(user.role)
-      if (user.role === "admin") {
-        next();
-      }
-      else {
-        return res.status(403).send({ message: 'Unauthorized Access!' });
+      console.log("inside va")
+      try {
+        const email = req.decoded?.email; // 🔑 use req.decoded
+        if (!email) {
+          return res.status(401).json({ message: "Unauthorized" });
+        }
 
+        const user = await usersCollection.findOne({ email });
+        console.log("👀 User found in DB:", user);
+
+        if (user?.role !== "admin") {
+          console.log(`❌ Access denied for ${email} (role: ${user?.role})`);
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        console.log(`✅ Admin verified: ${email}`);
+        next();
+      } catch (err) {
+        console.error("verifyAdmin error:", err);
+        res.status(500).json({ message: "Server error in verifyAdmin" });
       }
     };
+
+
 
 
     // Users Api
@@ -160,7 +175,8 @@ async function run() {
             email,
             photoURL,
             role,
-            badge
+            badge,
+            banned: false,
           })
 
 
@@ -308,15 +324,52 @@ async function run() {
       }
     });
 
-    // Ban user
-    app.patch("/users/ban/:userId", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const { userId } = req.params;
+    // Ban a user
+    app.patch("/users/ban/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const userId = req.params.id;
       const result = await usersCollection.updateOne(
         { _id: new ObjectId(userId) },
         { $set: { banned: true } }
       );
       res.json(result);
     });
+    // Unban a user
+    app.patch("/users/unban/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const userId = req.params.id;
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(userId) },
+        { $set: { banned: false } }
+      );
+      res.json(result);
+    });
+
+    // Toggle ban\unban a user
+    app.patch("/users/:id/ban", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { banned } = req.body; // should be true OR false
+
+        if (typeof banned !== "boolean") {
+          return res.status(400).json({ message: "banned must be a boolean" });
+        }
+
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { banned: banned } }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).json({ message: "User not found or not updated" });
+        }
+
+        res.json({ success: true, banned });
+      } catch (error) {
+        console.error("Error banning/unbanning user:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
+
 
 
 
@@ -601,8 +654,8 @@ async function run() {
         }
 
         const newComment = {
-          postId: id,
-          userId,
+          postId: new ObjectId(id),
+          userId: new ObjectId(userId),
           userName,
           userEmail: email,
           text,
@@ -622,13 +675,20 @@ async function run() {
     app.get("/comments/:postId", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
       try {
         const { postId } = req.params;
-        const comments = await commentsCollection.find({ postId }).toArray();
+
+        // ✅ convert postId string → ObjectId
+        const comments = await commentsCollection
+          .find({ postId: new ObjectId(postId) })
+          .sort({ createdAt: -1 }) // optional: newest first
+          .toArray();
+
         res.json(comments);
       } catch (error) {
         console.error("Error fetching comments:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
+
 
     // report a comment
     app.patch("/comments/report/:id", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
@@ -652,37 +712,36 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
-
-    //  Get all reported comments
-    app.get("/comments/reported", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+    app.get("/reported/comments", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       try {
-        const reportedComments = await commentsCollection
-          .find({ reported: true })
-          .sort({ createdAt: -1 })
-          .toArray();
-        res.json(reportedComments);
-      } catch (error) {
-        res.status(500).json({ message: "Failed to fetch reported comments" });
+        const reporteComment = await commentsCollection.find({ reported: true }).toArray();
+        res.send(reporteComment);
       }
-    });
+      catch (err) {
+        res.send(err);
+      }
+
+    })
 
 
-    // Delete a reported comment
+
+    // Delete comment
     app.delete("/comments/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const { id } = req.params;
+      const id = req.params.id;
       const result = await commentsCollection.deleteOne({ _id: new ObjectId(id) });
       res.json(result);
     });
 
-    // Dismiss a report (set reported=false, feedback="")
+    // Dismiss report
     app.patch("/comments/dismiss/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const { id } = req.params;
+      const id = req.params.id;
       const result = await commentsCollection.updateOne(
         { _id: new ObjectId(id) },
         { $set: { reported: false, feedback: "" } }
       );
       res.json(result);
     });
+
 
 
 
