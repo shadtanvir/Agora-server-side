@@ -59,7 +59,6 @@ const verifyFirebaseToken = async (req, res, next) => {
     req.decoded = decoded;
     next();
   } catch (error) {
-    console.error("❌ Token verification failed:", error.message);
     return res.status(401).json({ message: "Unauthorized Access!" });
   }
 };
@@ -119,7 +118,6 @@ async function run() {
 
         res.send({ clientSecret: paymentIntent.client_secret });
       } catch (err) {
-        console.error("Stripe error:", err);
         res.status(500).send({ error: err.message });
       }
     });
@@ -130,7 +128,6 @@ async function run() {
     // Verify admin middleware
 
     const verifyAdmin = async (req, res, next) => {
-      console.log("inside va")
       try {
         const email = req.decoded?.email; // 🔑 use req.decoded
         if (!email) {
@@ -138,23 +135,17 @@ async function run() {
         }
 
         const user = await usersCollection.findOne({ email });
-        console.log("👀 User found in DB:", user);
 
         if (user?.role !== "admin") {
-          console.log(`❌ Access denied for ${email} (role: ${user?.role})`);
           return res.status(403).json({ message: "Forbidden" });
         }
-
-        console.log(`✅ Admin verified: ${email}`);
         next();
       } catch (err) {
-        console.error("verifyAdmin error:", err);
         res.status(500).json({ message: "Server error in verifyAdmin" });
       }
     };
     // Verify ban middleware
     const verifyNotBanned = async (req, res, next) => {
-      console.log("inside VNB");
       try {
 
         const email = req.decoded?.email;
@@ -169,8 +160,6 @@ async function run() {
 
         next();
       } catch (error) {
-        console.log(error.message);
-        console.error("Error in verifyNotBanned:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     };
@@ -207,7 +196,6 @@ async function run() {
 
         res.status(201).json({ message: "User stored successfully", user });
       } catch (error) {
-        console.error("Error saving user:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -224,7 +212,6 @@ async function run() {
 
         res.json({ success: true, result });
       } catch (error) {
-        console.error("Error upgrading badge:", error);
         res.status(500).json({ message: "Failed to upgrade badge" });
       }
     });
@@ -259,7 +246,6 @@ async function run() {
           totalPages: Math.ceil(total / limit),
         });
       } catch (error) {
-        console.error("Error fetching users:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -290,7 +276,6 @@ async function run() {
     app.get("/get-user", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
       try {
         const email = req.query.email;
-        console.log("inside get-user");
         if (!email) {
           return res.status(400).json({ message: "Email is required" });
         }
@@ -317,7 +302,6 @@ async function run() {
         const count = await postsCollection.countDocuments({ authorEmail: email });
         res.json({ count });
       } catch (error) {
-        console.error("Error counting posts:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -342,7 +326,6 @@ async function run() {
 
         res.json({ user, recentPosts: posts });
       } catch (error) {
-        console.error("Error fetching user profile:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -357,7 +340,6 @@ async function run() {
         );
         res.json(result);
       } catch (error) {
-        console.error("Error updating user:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -402,7 +384,6 @@ async function run() {
 
         res.json({ success: true, banned });
       } catch (error) {
-        console.error("Error banning/unbanning user:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -420,7 +401,6 @@ async function run() {
           const tags = await tagsCollection.find({}).sort({ name: 1 }).toArray();
           res.send(tags);
         } catch (err) {
-          console.error("Failed to fetch tags:", err);
           res.status(500).send({ error: "Failed to fetch tags" });
         }
       });
@@ -477,8 +457,8 @@ async function run() {
         pipeline.push({
           $lookup: {
             from: "comments",
-            localField: "title",
-            foreignField: "postTitle",
+            localField: "_id",
+            foreignField: "postId",
             as: "commentsData",
           },
         });
@@ -512,7 +492,6 @@ async function run() {
           totalPages: Math.ceil(totalDocs / limit),
         });
       } catch (err) {
-        console.error(err);
         res.status(500).send({ error: "Failed to fetch posts" });
       }
     });
@@ -539,7 +518,6 @@ async function run() {
           hasMore: page * limit < total,
         });
       } catch (error) {
-        console.error("Error fetching user posts:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -581,7 +559,6 @@ async function run() {
         const result = await postsCollection.deleteOne({ _id: new ObjectId(id) });
         res.json(result);
       } catch (error) {
-        console.error("Error deleting post:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -613,7 +590,6 @@ async function run() {
 
         res.status(201).json({ message: "Post created successfully", postId: result.insertedId });
       } catch (error) {
-        console.error("Error creating post:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -684,7 +660,7 @@ async function run() {
 
     // search post + pagination
 
-    app.get("search/posts", async (req, res) => {
+    app.get("/search/posts", async (req, res) => {
       try {
         const q = req.query.q || "";
         const page = parseInt(req.query.page) || 1;
@@ -703,8 +679,8 @@ async function run() {
             {
               $lookup: {
                 from: "comments",
-                localField: "_id",       // post _id
-                foreignField: "postId",  // comment's postId is ObjectId
+                localField: "_id",
+                foreignField: "postId",
                 as: "commentsData",
               },
             },
@@ -714,7 +690,7 @@ async function run() {
                 voteDifference: { $subtract: ["$upVote", "$downVote"] },
               },
             },
-            { $sort: { createdAt: -1 } }, // newest first
+            { $sort: { createdAt: -1 } },
             { $skip: skip },
             { $limit: limit },
           ])
@@ -726,7 +702,7 @@ async function run() {
           totalPages: Math.ceil(total / limit),
         });
       } catch (err) {
-        console.error("❌ Error in /posts/search:", err);
+
         res.status(500).json({ error: "Failed to search posts" });
       }
     });
@@ -795,7 +771,6 @@ async function run() {
           hasMore: page * limit < total,
         });
       } catch (error) {
-        console.error("Error fetching comments:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -820,7 +795,6 @@ async function run() {
 
         res.json(result);
       } catch (error) {
-        console.error("Error reporting comment:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
@@ -853,7 +827,6 @@ async function run() {
             totalPages: Math.ceil(total / limit),
           });
         } catch (err) {
-          console.error("Error fetching reported comments:", err);
           res.status(500).send({ message: "Failed to fetch reported comments" });
         }
       }
@@ -920,7 +893,6 @@ async function run() {
         const result = await announcementsCollection.insertOne(newAnnouncement);
         res.json(result);
       } catch (error) {
-        console.error("Error creating announcement:", error);
         res.status(500).json({ message: "Internal Server Error" });
       }
     });
