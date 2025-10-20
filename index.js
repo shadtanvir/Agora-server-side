@@ -4,27 +4,27 @@ const cors = require("cors");
 
 // const { ObjectId } = require("mongodb");
 
-
-
-const { MongoClient, ServerApiVersion, ObjectId, ChangeStream } = require("mongodb");
+const {
+  MongoClient,
+  ServerApiVersion,
+  ObjectId,
+  ChangeStream,
+} = require("mongodb");
 dotenv.config();
 
 const admin = require("firebase-admin");
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8');
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
 
 const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
-
-
-
-
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-
 
 // Middleware
 app.use(cors());
@@ -42,9 +42,7 @@ const client = new MongoClient(uri, {
   },
 });
 
-
 // middleware
-
 
 const verifyFirebaseToken = async (req, res, next) => {
   const authHeader = req.headers?.authorization;
@@ -63,67 +61,59 @@ const verifyFirebaseToken = async (req, res, next) => {
   }
 };
 
-
-
-
-
-
 const verifyTokenEmail = async (req, res, next) => {
   // console.log(req.decoded.email);
   // console.log(req.query.email);
   if (req.query.email !== req.decoded.email) {
-    return res.status(403).send({ message: 'Forbidden Access!' });
-
+    return res.status(403).send({ message: "Forbidden Access!" });
   }
   next();
-
-}
-
-
+};
 
 async function run() {
   try {
-
-
     // await client.connect();
+    // console.log("MongoDB connected successfully");
     // collections
     const tagsCollection = client.db("agora").collection("tags");
     const postsCollection = client.db("agora").collection("posts");
     const usersCollection = client.db("agora").collection("users");
     const commentsCollection = client.db("agora").collection("comments");
-    const announcementsCollection = client.db("agora").collection("announcements");
+    const announcementsCollection = client
+      .db("agora")
+      .collection("announcements");
 
     // Payment related API
 
-
     /* Stripe instance
    Create payment intent*/
-    app.post("/create-payment-intent", verifyFirebaseToken, async (req, res) => {
-      try {
-        const { amount, user } = req.body;
+    app.post(
+      "/create-payment-intent",
+      verifyFirebaseToken,
+      async (req, res) => {
+        try {
+          const { amount, user } = req.body;
 
-        if (!amount || amount <= 0) {
-          return res.status(400).send({ error: "Invalid amount" });
+          if (!amount || amount <= 0) {
+            return res.status(400).send({ error: "Invalid amount" });
+          }
+
+          // Convert to smallest currency unit (e.g. cents for USD, poisha for BDT)
+          const paymentIntent = await stripe.paymentIntents.create({
+            amount: amount * 100, // if amount is in dollars/taka
+            currency: "usd", // change to "bdt" if you want taka
+            metadata: {
+              email: user.email,
+              name: user.name,
+            },
+          });
+
+          res.send({ clientSecret: paymentIntent.client_secret });
+        } catch (err) {
+          res.status(500).send({ error: err.message });
         }
-
-        // Convert to smallest currency unit (e.g. cents for USD, poisha for BDT)
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: amount * 100, // if amount is in dollars/taka
-          currency: "usd", // change to "bdt" if you want taka
-          metadata: {
-            email: user.email,
-            name: user.name,
-          },
-        });
-
-        res.send({ clientSecret: paymentIntent.client_secret });
-      } catch (err) {
-        res.status(500).send({ error: err.message });
       }
-    });
-
-
-
+    );
 
     // Verify admin middleware
 
@@ -147,7 +137,6 @@ async function run() {
     // Verify ban middleware
     const verifyNotBanned = async (req, res, next) => {
       try {
-
         const email = req.decoded?.email;
         if (!email) {
           return res.status(401).json({ message: "Unauthorized" });
@@ -163,8 +152,6 @@ async function run() {
         res.status(500).json({ message: "Internal Server Error" });
       }
     };
-
-
 
     // Users Api
 
@@ -189,9 +176,7 @@ async function run() {
             role,
             badge,
             banned: false,
-          })
-
-
+          });
         }
 
         res.status(201).json({ message: "User stored successfully", user });
@@ -201,21 +186,24 @@ async function run() {
     });
 
     // Upgrade badge after payment
-    app.patch("/users/upgrade/:email", verifyFirebaseToken, async (req, res) => {
-      try {
-        const { email } = req.params;
+    app.patch(
+      "/users/upgrade/:email",
+      verifyFirebaseToken,
+      async (req, res) => {
+        try {
+          const { email } = req.params;
 
-        const result = await usersCollection.updateOne(
-          { email },
-          { $set: { badge: "gold" } }
-        );
+          const result = await usersCollection.updateOne(
+            { email },
+            { $set: { badge: "gold" } }
+          );
 
-        res.json({ success: true, result });
-      } catch (error) {
-        res.status(500).json({ message: "Failed to upgrade badge" });
+          res.json({ success: true, result });
+        } catch (error) {
+          res.status(500).json({ message: "Failed to upgrade badge" });
+        }
       }
-    });
-
+    );
 
     // GET all users with optional search by username)
     app.get("/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
@@ -250,56 +238,61 @@ async function run() {
       }
     });
 
-
-
     // get user role
-    app.get("/get-user-role", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
-      try {
-        const email = req.query.email;
-        if (!email) {
-          return res.status(400).json({ message: "Email is required" });
+    app.get(
+      "/get-user-role",
+      verifyFirebaseToken,
+      verifyTokenEmail,
+      async (req, res) => {
+        try {
+          const email = req.query.email;
+          if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+          }
+
+          const user = await usersCollection.findOne({ email });
+          if (!user) {
+            return res.status(404).json({ message: "User not found" });
+          }
+
+          res.json({ role: user.role });
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
         }
-
-        const user = await usersCollection.findOne({ email });
-        if (!user) {
-          return res.status(404).json({ message: "User not found" });
-        }
-
-        res.json({ role: user.role });
-      } catch (error) {
-
-        res.status(500).json({ message: "Internal Server Error" });
       }
-    });
+    );
 
-    // GET a user 
-    app.get("/get-user", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
-      try {
-        const email = req.query.email;
-        if (!email) {
-          return res.status(400).json({ message: "Email is required" });
+    // GET a user
+    app.get(
+      "/get-user",
+      verifyFirebaseToken,
+      verifyTokenEmail,
+      async (req, res) => {
+        try {
+          const email = req.query.email;
+          if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+          }
+
+          const dbUser = await usersCollection.findOne({ email });
+          if (!dbUser) {
+            return res.status(404).json({ message: "User not found" });
+          }
+
+          res.json(dbUser);
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
         }
-
-        const dbUser = await usersCollection.findOne({ email });
-        if (!dbUser) {
-          return res.status(404).json({ message: "User not found" });
-        }
-
-        res.json(dbUser);
-      } catch (error) {
-
-        res.status(500).json({ message: "Internal Server Error" });
       }
-    });
-
-
-
+    );
 
     // count user's posts
     app.get("/posts/count/:email", async (req, res) => {
       try {
         const { email } = req.params;
-        const count = await postsCollection.countDocuments({ authorEmail: email });
+        const count = await postsCollection.countDocuments({
+          authorEmail: email,
+        });
         res.json({ count });
       } catch (error) {
         res.status(500).json({ message: "Internal Server Error" });
@@ -331,79 +324,194 @@ async function run() {
     });
 
     // PATCH make a user admin
-    app.patch("/users/make-admin/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      try {
-        const { id } = req.params;
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { role: "admin" } }
-        );
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({ message: "Internal Server Error" });
+    app.patch(
+      "/users/make-admin/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const result = await usersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { role: "admin" } }
+          );
+          res.json(result);
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
+        }
       }
-    });
+    );
 
     // Ban a user
-    app.patch("/users/ban/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const userId = req.params.id;
-      const result = await usersCollection.updateOne(
-        { _id: new ObjectId(userId) },
-        { $set: { banned: true } }
-      );
-      res.json(result);
-    });
+    app.patch(
+      "/users/ban/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const userId = req.params.id;
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { banned: true } }
+        );
+        res.json(result);
+      }
+    );
     // Unban a user
-    app.patch("/users/unban/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const userId = req.params.id;
-      const result = await usersCollection.updateOne(
-        { _id: new ObjectId(userId) },
-        { $set: { banned: false } }
-      );
-      res.json(result);
-    });
+    app.patch(
+      "/users/unban/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const userId = req.params.id;
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { banned: false } }
+        );
+        res.json(result);
+      }
+    );
 
     // Toggle ban\unban a user
-    app.patch("/users/:id/ban", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+    app.patch(
+      "/users/:id/ban",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { banned } = req.body; // should be true OR false
+
+          if (typeof banned !== "boolean") {
+            return res
+              .status(400)
+              .json({ message: "banned must be a boolean" });
+          }
+
+          const result = await usersCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { banned: banned } }
+          );
+
+          if (result.modifiedCount === 0) {
+            return res
+              .status(404)
+              .json({ message: "User not found or not updated" });
+          }
+
+          res.json({ success: true, banned });
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
+        }
+      }
+    );
+
+    // Featured Members
+
+    app.get("/featured-members", async (req, res) => {
       try {
-        const { id } = req.params;
-        const { banned } = req.body; // should be true OR false
+        const featuredMembers = await usersCollection
+          .aggregate([
+            // Join posts with users
+            {
+              $lookup: {
+                from: "posts",
+                localField: "email",
+                foreignField: "authorEmail",
+                as: "userPosts",
+              },
+            },
+            // Calculate total post count for each user
+            {
+              $addFields: {
+                totalPosts: { $size: "$userPosts" },
+              },
+            },
+            // Filter out banned users and only show active ones
+            {
+              $match: {
+                banned: false,
+                $or: [
+                  { badge: "gold" }, // Special members
+                  { totalPosts: { $gt: 0 } }, // Active contributors
+                ],
+              },
+            },
+            // Sort: Gold members first, then by total posts
+            {
+              $sort: { badge: -1, totalPosts: -1 },
+            },
+            // Limit result for front-end
+            {
+              $limit: 10,
+            },
+            // Return only needed fields
+            {
+              $project: {
+                _id: 1,
+                name: 1,
+                email: 1,
+                photoURL: 1,
+                badge: 1,
+                totalPosts: 1,
+                role: 1,
+              },
+            },
+          ])
+          .toArray();
 
-        if (typeof banned !== "boolean") {
-          return res.status(400).json({ message: "banned must be a boolean" });
-        }
-
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { banned: banned } }
-        );
-
-        if (result.modifiedCount === 0) {
-          return res.status(404).json({ message: "User not found or not updated" });
-        }
-
-        res.json({ success: true, banned });
+        res.send(featuredMembers);
       } catch (error) {
-        res.status(500).json({ message: "Internal Server Error" });
+        console.error("Error fetching featured members:", error);
+        res.status(500).send({ message: "Internal Server Error" });
       }
     });
 
+    // User overview
+    app.get("/overview", verifyFirebaseToken, async (req, res) => {
+  try {
+    const { email } = req.query;
+  
+    if (!email) return res.status(400).json({ message: "Email is required" });
 
+    const user = await usersCollection.findOne({ email });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
+    const posts = await postsCollection
+      .find({ authorEmail: email })
+      .sort({ createdAt: -1 })
+      .toArray();
+    const comments = await commentsCollection
+      .find({ userEmail: email })
+      .sort({ createdAt: -1 })
+      .toArray();
 
+    const stats = {
+      posts: posts.length,
+      comments: comments.length,
+      likes: posts.reduce((acc, p) => acc + (p.upVote || 0), 0),
+      recentPosts: posts.slice(0, 5),
+      recentComments: comments.slice(0, 5),
+      user,
+    };
+
+    res.json(stats);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
     // -------- TAGS API -------- //
 
     // Get all tags
-    app.get("/tags",
-      async (req, res) => {
-        try {
-          const tags = await tagsCollection.find({}).sort({ name: 1 }).toArray();
-          res.send(tags);
-        } catch (err) {
-          res.status(500).send({ error: "Failed to fetch tags" });
-        }
-      });
+    app.get("/tags", async (req, res) => {
+      try {
+        const tags = await tagsCollection.find({}).sort({ name: 1 }).toArray();
+        res.send(tags);
+      } catch (err) {
+        res.status(500).send({ error: err.message });
+      }
+    });
 
     // Add a tag
     app.post("/tags", verifyFirebaseToken, verifyAdmin, async (req, res) => {
@@ -416,7 +524,6 @@ async function run() {
       }
     });
 
-
     // Search by tag
     app.get("/search", async (req, res) => {
       try {
@@ -428,7 +535,7 @@ async function run() {
 
         // Case-insensitive search in tag field
         const posts = await Post.find({
-          tag: { $regex: q, $options: "i" }
+          tag: { $regex: q, $options: "i" },
         }).sort({ createdAt: -1 });
 
         res.json(posts);
@@ -437,8 +544,22 @@ async function run() {
       }
     });
 
-
-
+    // Trending tags
+    app.get("/trending-tags", verifyFirebaseToken, async (req, res) => {
+      try {
+        const tags = await postsCollection
+          .aggregate([
+            { $group: { _id: "$tag", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 10 },
+            { $project: { name: "$_id", count: 1, _id: 0 } },
+          ])
+          .toArray();
+        res.send(tags);
+      } catch (error) {
+        res.status(500).send({ error: "Failed to load trending tags" });
+      }
+    });
 
     // Posts related API
 
@@ -495,33 +616,40 @@ async function run() {
         res.status(500).send({ error: "Failed to fetch posts" });
       }
     });
-    // fetch all the podt of a user + pagination
-    app.get("/posts/by-user", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
-      try {
-        const { email, page = 1, limit = 5 } = req.query;
-        if (!email) return res.status(400).json({ message: "Email required" });
+    // fetch all the post of a user + pagination
+    app.get(
+      "/posts/by-user",
+      verifyFirebaseToken,
+      verifyTokenEmail,
+      async (req, res) => {
+        try {
+          const { email, page = 1, limit = 5 } = req.query;
+          if (!email)
+            return res.status(400).json({ message: "Email required" });
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+          const skip = (parseInt(page) - 1) * parseInt(limit);
 
-        const posts = await postsCollection
-          .find({ authorEmail: email })
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(parseInt(limit))
-          .toArray();
+          const posts = await postsCollection
+            .find({ authorEmail: email })
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit))
+            .toArray();
 
-        const total = await postsCollection.countDocuments({ authorEmail: email });
+          const total = await postsCollection.countDocuments({
+            authorEmail: email,
+          });
 
-        res.json({
-          posts,
-          total,
-          hasMore: page * limit < total,
-        });
-      } catch (error) {
-        res.status(500).json({ message: "Internal Server Error" });
+          res.json({
+            posts,
+            total,
+            hasMore: page * limit < total,
+          });
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
+        }
       }
-    });
-
+    );
 
     // fetch single post by id
     app.get("/posts/:id", async (req, res) => {
@@ -542,121 +670,204 @@ async function run() {
       }
     });
 
-    // Delete a post
-    app.delete("/posts/:id", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
+    // Top contributors
+    app.get("/top-contributors", verifyFirebaseToken, async (req, res) => {
       try {
-        const { id } = req.params;
-        const { email } = req.query;
+        const contributors = await postsCollection
+          .aggregate([
+            {
+              $group: {
+                _id: "$authorEmail",
+                name: { $first: "$authorName" },
+                image: { $first: "$authorImage" },
+                posts: { $sum: 1 },
+                votes: { $sum: { $add: ["$upVote", "$downVote"] } },
+              },
+            },
+            { $sort: { posts: -1, votes: -1 } },
+            { $limit: 6 },
+          ])
+          .toArray();
 
-        const post = await postsCollection.findOne({ _id: new ObjectId(id) });
-        if (!post) return res.status(404).json({ message: "Post not found" });
-
-        // Ensure only the author can delete
-        if (post.authorEmail !== email) {
-          return res.status(403).json({ message: "Unauthorized" });
-        }
-
-        const result = await postsCollection.deleteOne({ _id: new ObjectId(id) });
-        res.json(result);
+        res.send(contributors);
       } catch (error) {
-        res.status(500).json({ message: "Internal Server Error" });
+        res.status(500).send({ error: "Failed to load contributors" });
       }
     });
 
+    // Recent posts
+    app.get("/recent-posts", verifyFirebaseToken, async (req, res) => {
+      try {
+        const posts = await postsCollection
+          .find({})
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .project({
+            title: 1,
+            authorName: 1,
+            authorImage: 1,
+            tag: 1,
+            createdAt: 1,
+          })
+          .toArray();
 
+        // format timeAgo
+        const now = new Date();
+        const formattedPosts = posts.map((post) => {
+          const diffMs = now - new Date(post.createdAt);
+          const diffMins = Math.floor(diffMs / 60000);
+          const timeAgo =
+            diffMins < 60
+              ? `${diffMins}m ago`
+              : diffMins < 1440
+              ? `${Math.floor(diffMins / 60)}h ago`
+              : `${Math.floor(diffMins / 1440)}d ago`;
+
+          return { ...post, timeAgo };
+        });
+
+        res.status(200).json(formattedPosts);
+      } catch (error) {
+        console.error("Error fetching recent posts:", error);
+        res.status(500).json({ message: "Failed to fetch recent posts" });
+      }
+    });
+
+    // Delete a post
+    app.delete(
+      "/posts/:id",
+      verifyFirebaseToken,
+      verifyTokenEmail,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { email } = req.query;
+
+          const post = await postsCollection.findOne({ _id: new ObjectId(id) });
+          if (!post) return res.status(404).json({ message: "Post not found" });
+
+          // Ensure only the author can delete
+          if (post.authorEmail !== email) {
+            return res.status(403).json({ message: "Unauthorized" });
+          }
+
+          const result = await postsCollection.deleteOne({
+            _id: new ObjectId(id),
+          });
+          res.json(result);
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
+        }
+      }
+    );
 
     // Add a post
-    app.post("/posts", verifyFirebaseToken, verifyNotBanned, async (req, res) => {
-      try {
-        const { authorImage, authorName, authorEmail, title, description, tag } = req.body;
+    app.post(
+      "/posts",
+      verifyFirebaseToken,
+      verifyNotBanned,
+      async (req, res) => {
+        try {
+          const {
+            authorImage,
+            authorName,
+            authorEmail,
+            title,
+            description,
+            tag,
+          } = req.body;
 
-        if (!authorEmail || !title || !description || !tag) {
-          return res.status(400).json({ message: "Missing required fields" });
+          if (!authorEmail || !title || !description || !tag) {
+            return res.status(400).json({ message: "Missing required fields" });
+          }
+
+          const newPost = {
+            authorImage,
+            authorName,
+            authorEmail,
+            title,
+            description,
+            tag,
+            upVote: 0,
+            downVote: 0,
+            createdAt: new Date(),
+          };
+
+          const result = await postsCollection.insertOne(newPost);
+
+          res.status(201).json({
+            message: "Post created successfully",
+            postId: result.insertedId,
+          });
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
         }
-
-        const newPost = {
-          authorImage,
-          authorName,
-          authorEmail,
-          title,
-          description,
-          tag,
-          upVote: 0,
-          downVote: 0,
-          createdAt: new Date(),
-        };
-
-        const result = await postsCollection.insertOne(newPost);
-
-        res.status(201).json({ message: "Post created successfully", postId: result.insertedId });
-      } catch (error) {
-        res.status(500).json({ message: "Internal Server Error" });
       }
-    });
-
+    );
 
     // Vote (upvote, downvote)
 
-    app.patch("/posts/:id/vote", verifyFirebaseToken, verifyNotBanned, verifyTokenEmail, async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { email, type } = req.query;
+    app.patch(
+      "/posts/:id/vote",
+      verifyFirebaseToken,
+      verifyNotBanned,
+      verifyTokenEmail,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { email, type } = req.query;
 
-        if (!["upvote", "downvote"].includes(type)) {
-          return res.status(400).json({ error: "Invalid vote type" });
+          if (!["upvote", "downvote"].includes(type)) {
+            return res.status(400).json({ error: "Invalid vote type" });
+          }
+
+          const postId = new ObjectId(id);
+          const post = await postsCollection.findOne({ _id: postId });
+          if (!post) return res.status(404).json({ error: "Post not found" });
+
+          const existingVote = post.votes?.find((v) => v.email === email);
+
+          let updateOps = {};
+
+          if (!existingVote) {
+            // Case 1: New vote
+            updateOps = {
+              $inc: { [type === "upvote" ? "upVote" : "downVote"]: 1 },
+              $push: { votes: { email, type } },
+            };
+          } else if (existingVote.type === type) {
+            // Case 2: Remove same vote
+            updateOps = {
+              $inc: { [type === "upvote" ? "upVote" : "downVote"]: -1 },
+              $pull: { votes: { email } },
+            };
+          } else {
+            // Case 3: Switch vote (no arrayFilters, just $pull + $push)
+            updateOps = {
+              $inc: {
+                [type === "upvote" ? "upVote" : "downVote"]: 1,
+                [type === "upvote" ? "downVote" : "upVote"]: -1,
+              },
+              $pull: { votes: { email } },
+              $push: { votes: { email, type } },
+            };
+          }
+
+          const result = await postsCollection.findOneAndUpdate(
+            { _id: postId },
+            updateOps,
+            { returnDocument: "after" }
+          );
+
+          res.json(result.value);
+        } catch (err) {
+          // console.error(" Vote error:", err);
+          res
+            .status(500)
+            .json({ error: "Failed to vote", details: err.message });
         }
-
-        const postId = new ObjectId(id);
-        const post = await postsCollection.findOne({ _id: postId });
-        if (!post) return res.status(404).json({ error: "Post not found" });
-
-        const existingVote = post.votes?.find(v => v.email === email);
-
-        let updateOps = {};
-
-        if (!existingVote) {
-          // Case 1: New vote
-          updateOps = {
-            $inc: { [type === "upvote" ? "upVote" : "downVote"]: 1 },
-            $push: { votes: { email, type } }
-          };
-        } else if (existingVote.type === type) {
-          // Case 2: Remove same vote
-          updateOps = {
-            $inc: { [type === "upvote" ? "upVote" : "downVote"]: -1 },
-            $pull: { votes: { email } }
-          };
-        } else {
-          // Case 3: Switch vote (no arrayFilters, just $pull + $push)
-          updateOps = {
-            $inc: {
-              [type === "upvote" ? "upVote" : "downVote"]: 1,
-              [type === "upvote" ? "downVote" : "upVote"]: -1
-            },
-            $pull: { votes: { email } },
-            $push: { votes: { email, type } }
-          };
-        }
-
-        const result = await postsCollection.findOneAndUpdate(
-          { _id: postId },
-          updateOps,
-          { returnDocument: "after" }
-        );
-
-        res.json(result.value);
-      } catch (err) {
-        // console.error(" Vote error:", err);
-        res.status(500).json({ error: "Failed to vote", details: err.message });
       }
-    });
-
-
-
-
-
-
-
+    );
 
     // search post + pagination
 
@@ -702,48 +913,47 @@ async function run() {
           totalPages: Math.ceil(total / limit),
         });
       } catch (err) {
-
         res.status(500).json({ error: "Failed to search posts" });
       }
     });
-
-
-
-
-
-
 
     // Comments collection API
 
     //Add a new comment (user must be logged in)
 
-    app.post("/posts/:id/comments", verifyFirebaseToken, verifyNotBanned, verifyTokenEmail, async (req, res) => {
-      try {
-        const id = req.params.id;
-        const email = req.query.email;
-        const { userId, userName, text } = req.body;
+    app.post(
+      "/posts/:id/comments",
+      verifyFirebaseToken,
+      verifyNotBanned,
+      verifyTokenEmail,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const email = req.query.email;
+          const { userId, userName, text } = req.body;
 
-        if (!userId || !text) {
-          return res.status(400).json({ error: "Missing user or text" });
+          if (!userId || !text) {
+            return res.status(400).json({ error: "Missing user or text" });
+          }
+
+          const newComment = {
+            postId: new ObjectId(id),
+            userId: new ObjectId(userId),
+            userName,
+            userEmail: email,
+            text,
+            reported: false,
+            feedback: "",
+            createdAt: new Date(),
+          };
+
+          await commentsCollection.insertOne(newComment);
+          res.json({ success: true, comment: newComment });
+        } catch (err) {
+          res.status(500).json({ error: "Failed to add comment" });
         }
-
-        const newComment = {
-          postId: new ObjectId(id),
-          userId: new ObjectId(userId),
-          userName,
-          userEmail: email,
-          text,
-          reported: false,
-          feedback: "",
-          createdAt: new Date(),
-        };
-
-        await commentsCollection.insertOne(newComment);
-        res.json({ success: true, comment: newComment });
-      } catch (err) {
-        res.status(500).json({ error: "Failed to add comment" });
       }
-    });
+    );
 
     // get comments by post with pagination
     app.get("/comments/:postId", async (req, res) => {
@@ -775,29 +985,32 @@ async function run() {
       }
     });
 
-
-
     // report a comment
-    app.patch("/comments/report/:id", verifyFirebaseToken, verifyTokenEmail, async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { feedback } = req.body; // user-selected feedback
+    app.patch(
+      "/comments/report/:id",
+      verifyFirebaseToken,
+      verifyTokenEmail,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { feedback } = req.body; // user-selected feedback
 
-        const result = await commentsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              reported: true,
-              feedback: feedback,
-            },
-          }
-        );
+          const result = await commentsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $set: {
+                reported: true,
+                feedback: feedback,
+              },
+            }
+          );
 
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({ message: "Internal Server Error" });
+          res.json(result);
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
+        }
       }
-    });
+    );
     // GET Reported comments
     app.get(
       "/reported/comments",
@@ -827,35 +1040,41 @@ async function run() {
             totalPages: Math.ceil(total / limit),
           });
         } catch (err) {
-          res.status(500).send({ message: "Failed to fetch reported comments" });
+          res
+            .status(500)
+            .send({ message: "Failed to fetch reported comments" });
         }
       }
     );
 
-
-
-
     // Delete comment
-    app.delete("/comments/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const result = await commentsCollection.deleteOne({ _id: new ObjectId(id) });
-      res.json(result);
-    });
+    app.delete(
+      "/comments/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const result = await commentsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.json(result);
+      }
+    );
 
     // Dismiss report
-    app.patch("/comments/dismiss/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const result = await commentsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { reported: false, feedback: "" } }
-      );
-      res.json(result);
-    });
-
-
-
-
-
+    app.patch(
+      "/comments/dismiss/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const result = await commentsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { reported: false, feedback: "" } }
+        );
+        res.json(result);
+      }
+    );
 
     // Announcements API
     // Get announcements
@@ -880,65 +1099,87 @@ async function run() {
       }
     });
     // POST new announcement
-    app.post("/announcements", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      try {
-        const { authorImage, authorName, title, description } = req.body;
-        const newAnnouncement = {
-          authorImage,
-          authorName,
-          title,
-          description,
-          createdAt: new Date()
-        };
-        const result = await announcementsCollection.insertOne(newAnnouncement);
-        res.json(result);
-      } catch (error) {
-        res.status(500).json({ message: "Internal Server Error" });
+    app.post(
+      "/announcements",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { authorImage, authorName, title, description } = req.body;
+          const newAnnouncement = {
+            authorImage,
+            authorName,
+            title,
+            description,
+            createdAt: new Date(),
+          };
+          const result = await announcementsCollection.insertOne(
+            newAnnouncement
+          );
+          res.json(result);
+        } catch (error) {
+          res.status(500).json({ message: "Internal Server Error" });
+        }
       }
-    });
-
+    );
 
     // Admin stats API
 
-    app.get("/admin/stats", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      try {
-        const posts = await postsCollection.countDocuments();
-        const comments = await commentsCollection.countDocuments();
-        const users = await usersCollection.countDocuments();
+    app.get(
+      "/admin/stats",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const posts = await postsCollection.countDocuments();
+          const comments = await commentsCollection.countDocuments();
+          const users = await usersCollection.countDocuments();
 
-        res.json({ posts, comments, users });
+          res.json({ posts, comments, users });
+        } catch (error) {
+          res.status(500).json({ message: "Failed to fetch stats" });
+        }
+      }
+    );
+
+    // Community Impacts
+
+    app.get("/community-impact", async (req, res) => {
+      try {
+        const totalMembers = await usersCollection.countDocuments({
+          banned: false,
+        });
+        const totalPosts = await postsCollection.countDocuments();
+        const posts = await postsCollection.find({}).toArray();
+
+        const totalUpvotes = posts.reduce(
+          (sum, post) => sum + (post.upVote || 0),
+          0
+        );
+        const contributorEmails = [...new Set(posts.map((p) => p.authorEmail))];
+        const topContributors = contributorEmails.length;
+
+        res.send({
+          totalMembers,
+          totalPosts,
+          totalUpvotes,
+          topContributors,
+        });
       } catch (error) {
-        res.status(500).json({ message: "Failed to fetch stats" });
+        console.error("Error fetching community impact:", error);
+        res.status(500).send({ message: "Failed to fetch community impact" });
       }
     });
-
-
-
-
-
-
-
-
 
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
-
   } finally {
   }
 }
-
 
 run().catch(console.dir);
 
 app.get("/", async (req, res) => {
   res.send("Server is running!");
 });
-
-
-
-
-
-
-
-
