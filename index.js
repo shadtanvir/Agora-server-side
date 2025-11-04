@@ -72,8 +72,8 @@ const verifyTokenEmail = async (req, res, next) => {
 
 async function run() {
   try {
-    // await client.connect();
-    // console.log("MongoDB connected successfully");
+    await client.connect();
+    console.log("MongoDB connected successfully");
     // collections
     const tagsCollection = client.db("agora").collection("tags");
     const postsCollection = client.db("agora").collection("posts");
